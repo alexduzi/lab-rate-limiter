@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_ADDR=redis:6379
+      - IP_LIMIT_RPS=10
+      - IP_BLOCK_DURATION=300s
+      - TOKEN_LIMIT_RPS=100
+      - TOKEN_BLOCK_DURATION=300s
+    depends_on:
+      redis:
+        condition: service_healthy
