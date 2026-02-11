@@ -13,33 +13,31 @@ type memoryEntry struct {
 }
 
 type MemoryStorage struct {
-	data sync.Map
-	mu   sync.RWMutex
+	mu   sync.Mutex
+	data map[string]*memoryEntry
 }
 
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
-		data: sync.Map{},
+		data: make(map[string]*memoryEntry),
 	}
 }
 
 func (m *MemoryStorage) Increment(ctx context.Context, key string, window time.Duration) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	now := time.Now()
 
-	value, exists := m.data.Load(key)
-
+	entry, exists := m.data[key]
 	if !exists {
-		entry := &memoryEntry{
+		m.data[key] = &memoryEntry{
 			counter:     1,
 			windowStart: now,
 		}
-		m.data.Store(key, entry)
 		return 1, nil
 	}
 
-	entry := value.(*memoryEntry)
-
-	// Se passou a janela, reseta
 	if now.Sub(entry.windowStart) >= window {
 		entry.counter = 1
 		entry.windowStart = now
@@ -47,17 +45,17 @@ func (m *MemoryStorage) Increment(ctx context.Context, key string, window time.D
 		entry.counter++
 	}
 
-	m.data.Store(key, entry)
 	return entry.counter, nil
 }
 
 func (m *MemoryStorage) IsBlocked(ctx context.Context, key string) (bool, error) {
-	value, exists := m.data.Load(key)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	entry, exists := m.data[key]
 	if !exists {
 		return false, nil
 	}
-
-	entry := value.(*memoryEntry)
 
 	if entry.blockedUntil == nil {
 		return false, nil
@@ -67,34 +65,33 @@ func (m *MemoryStorage) IsBlocked(ctx context.Context, key string) (bool, error)
 		return true, nil
 	}
 
-	// Bloqueio expirou
 	entry.blockedUntil = nil
-	m.data.Store(key, entry)
 	return false, nil
 }
 
 func (m *MemoryStorage) Block(ctx context.Context, key string, duration time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	blockedUntil := time.Now().Add(duration)
 
-	value, exists := m.data.Load(key)
-
+	entry, exists := m.data[key]
 	if !exists {
-		entry := &memoryEntry{
+		m.data[key] = &memoryEntry{
 			blockedUntil: &blockedUntil,
 		}
-		m.data.Store(key, entry)
 		return nil
 	}
 
-	entry := value.(*memoryEntry)
 	entry.blockedUntil = &blockedUntil
-	m.data.Store(key, entry)
-
 	return nil
 }
 
 func (m *MemoryStorage) Reset(ctx context.Context, key string) error {
-	m.data.Delete(key)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.data, key)
 	return nil
 }
 
